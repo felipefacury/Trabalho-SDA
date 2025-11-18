@@ -5,6 +5,17 @@ import socket
 
 OPCUA_URL   = "opc.tcp://localhost:53530/OPCUA/SimulationServer"
 
+dx:float = 0.0
+dy:float = 0.0
+dz:float = 0.0
+
+tz:float = 0.0
+tx:float = 0.0
+ty:float = 0.0
+
+mutex:threading.Lock = threading.Lock()
+mutex2:threading.Lock = threading.Lock()
+
 def getCoordinates(client:opcClient) -> tuple[float, float, float]:
     root = client.get_objects_node()
     drone_folder = None
@@ -78,16 +89,19 @@ def writeCoordinates(x:float, y:float, z:float, client:opcClient):
 
 def opcClientThread(event:threading.Event):
     try:
+        global tx, ty, tz, dx, dy, dz
+
         client = opcClient(OPCUA_URL)
         client.connect()
         while not event.is_set():
             (px, py, pz) = getCoordinates(client)
-            x = px.get_value()
-            y = py.get_value()
-            z = pz.get_value()
+            with mutex2:
+                dx = px.get_value()
+                dy = py.get_value()
+                dz = pz.get_value()
             # Control logic he
-            z = float(input("Enter new Z coordinate: "))
-            writeCoordinates(x, y, z, client)
+            with mutex:
+                writeCoordinates(tx, ty, tz, client)
             
     except Exception as e:
         print("Error in OPC UA Client thread:", e)
@@ -96,14 +110,40 @@ def opcClientThread(event:threading.Event):
         client.disconnect()
 
 
-def tcpServerThread():
+def tcpServerThread(event:threading.Event):
     try:
-        tcpServer = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        tcpServer.bind(('localhost', 9999))
-        tcpServer.listen()
+        global tx, ty, tz, dx, dy, dz
+
+        tcpSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcpSocket.bind(("localhost", 5005))
+        tcpSocket.settimeout(1.0)
+
+        while not event.is_set():
+            tcpSocket.listen()
+            try:
+                conn, addr = tcpSocket.accept()
+            except socket.timeout:
+                continue
+            with conn:
+                print("Connected by", addr)
+                data = conn.recv(1024)
+                if not data:
+                    continue
+                print("Received data:", data)
+                with mutex:
+                    x_str, y_str, z_str = data.decode('utf-8').split(',')
+                    tx = float(x_str)
+                    ty = float(y_str)
+                    tz = float(z_str)
+                # Process data as needed
+                response = b"ACK"
+                conn.sendall(response)
 
     except Exception as e:
-        print("Error in OPC UA Server thread:", e)
+        print("Error in TCP Server thread:", e)
+    finally:
+        print("Shutting down TCP server...")
+        tcpSocket.close()
 
 def main():
     event = threading.Event()
@@ -111,11 +151,14 @@ def main():
 
     try:
         client = threading.Thread(target=opcClientThread, args=(event,))
+        server = threading.Thread(target=tcpServerThread, args=(event,))
         client.start()
-        #server.start()
+        server.start()
 
         while client.is_alive():
             client.join(timeout=1.0)
+        while server.is_alive():
+            server.join(timeout=1.0)
 
     except KeyboardInterrupt:
         event.set()
