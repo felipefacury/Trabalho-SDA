@@ -2,19 +2,14 @@ import threading
 from opcua import Client as opcClient
 from opcua import ua
 import socket
+import queue
 
 OPCUA_URL   = "opc.tcp://localhost:53530/OPCUA/SimulationServer"
 
-dx:float = 0.0
-dy:float = 0.0
-dz:float = 0.0
+posQueue:queue.Queue[tuple[float, float, float]] = queue.Queue()
 
-tz:float = 0.0
-tx:float = 0.0
-ty:float = 0.0
+cmdQueue:queue.Queue[tuple[float, float, float]] = queue.Queue()
 
-mutex:threading.Lock = threading.Lock()
-mutex2:threading.Lock = threading.Lock()
 
 def getCoordinates(client:opcClient) -> tuple[float, float, float]:
     root = client.get_objects_node()
@@ -89,19 +84,19 @@ def writeCoordinates(x:float, y:float, z:float, client:opcClient):
 
 def opcClientThread(event:threading.Event):
     try:
-        global tx, ty, tz, dx, dy, dz
-
         client = opcClient(OPCUA_URL)
         client.connect()
         while not event.is_set():
             (px, py, pz) = getCoordinates(client)
-            with mutex2:
+            if not posQueue.full():
                 dx = px.get_value()
                 dy = py.get_value()
                 dz = pz.get_value()
+                posQueue.put((dx, dy, dz))
             # Control logic he
-            with mutex:
-                writeCoordinates(tx, ty, tz, client)
+            if not cmdQueue.empty():
+                (x, y, z) = cmdQueue.get()
+                writeCoordinates(x, y, z, client)
             
     except Exception as e:
         print("Error in OPC UA Client thread:", e)
@@ -112,33 +107,37 @@ def opcClientThread(event:threading.Event):
 
 def tcpServerThread(event:threading.Event):
     try:
-        global tx, ty, tz, dx, dy, dz
-
         tcpSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        tcpSocket.bind(("localhost", 5005))
         tcpSocket.settimeout(1.0)
+        tcpSocket.bind(("localhost", 5055))
+        tcpSocket.listen()
 
         while not event.is_set():
-            tcpSocket.listen()
             try:
                 conn, addr = tcpSocket.accept()
             except socket.timeout:
                 continue
             with conn:
-                print("Connected by", addr)
-                data = conn.recv(1024)
-                if not data:
-                    continue
-                print("Received data:", data)
-                with mutex:
-                    x_str, y_str, z_str = data.decode('utf-8').split(',')
-                    tx = float(x_str)
-                    ty = float(y_str)
-                    tz = float(z_str)
-                # Process data as needed
-                response = b"ACK"
-                conn.sendall(response)
+                while not event.is_set():
+                    print("Connected by", addr)
+                    data = conn.recv(1024)
+                    if not data:
+                        continue
+                    print("Received data:", data)
+                    if data.decode('utf-8').lower() == "nop":
+                        pass
+                    else:
+                        x_str, y_str, z_str = data.decode('utf-8').split(',')
+                        tx = float(x_str)
+                        ty = float(y_str)
+                        tz = float(z_str)
+                        cmdQueue.put((tx, ty, tz))
+                        print(f"Updated target to: ({tx}, {ty}, {tz})")
 
+                    (dx, dy, dz) = posQueue.get()
+                    response = f"{dx},{dy},{dz}".encode('utf-8')
+                    print("Sending response:", response)
+                    conn.sendall(response)
     except Exception as e:
         print("Error in TCP Server thread:", e)
     finally:
