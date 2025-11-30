@@ -119,11 +119,17 @@ def tcpServerThread(event:threading.Event):
                 continue
             with conn:
                 while not event.is_set():
-                    print("Connected by", addr)
+                    #print("Connected by", addr)
+
+                    (dx, dy, dz) = posQueue.get()
+                    response = f"{dx},{dy},{dz}".encode('utf-8')
+                    #print("Sending response:", response)
+                    conn.sendall(response)
+
                     data = conn.recv(1024)
                     if not data:
-                        continue
-                    print("Received data:", data)
+                        pass
+                    #print("Received data:", data)
                     if data.decode('utf-8').lower() == "nop":
                         pass
                     else:
@@ -132,12 +138,8 @@ def tcpServerThread(event:threading.Event):
                         ty = float(y_str)
                         tz = float(z_str)
                         cmdQueue.put((tx, ty, tz))
-                        print(f"Updated target to: ({tx}, {ty}, {tz})")
+                        #print(f"Updated target to: ({tx}, {ty}, {tz})")
 
-                    (dx, dy, dz) = posQueue.get()
-                    response = f"{dx},{dy},{dz}".encode('utf-8')
-                    print("Sending response:", response)
-                    conn.sendall(response)
     except Exception as e:
         print("Error in TCP Server thread:", e)
     finally:

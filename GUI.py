@@ -20,7 +20,7 @@ class DroneGUI:
         # --- Variáveis de Comunicação (mantidas) ---
         self.cmd_x = tk.DoubleVar(value=0.0)
         self.cmd_y = tk.DoubleVar(value=0.0)
-        self.cmd_z = tk.DoubleVar(value=0.0)
+        self.cmd_z = tk.DoubleVar(value=1.5)
         
         self.pos_x = 0.0 
         self.pos_y = 0.0
@@ -133,6 +133,16 @@ class DroneGUI:
         tk.Label(cmd_frame, textvariable=self.cmd_z).pack(side=tk.LEFT, padx=5)
         tk.Label(control_frame, text="^ Comandos (OUTPUT) ^").grid(row=3, column=0, columnspan=2)
 
+        if not cmdQueue.empty():
+            (x, y, z) = cmdQueue.get()
+            self.cmd_x.set(x)
+            self.cmd_y.set(y)
+            self.cmd_z.set(z)
+        else:
+            self.cmd_x.set(0.0)
+            self.cmd_y.set(0.0) 
+            self.cmd_z.set(1.5)
+
 
     # --- Métodos de Mapa e Simulação (Mantidos) ---
     def setup_map_panel(self):
@@ -184,6 +194,8 @@ class DroneGUI:
             self.pos_y = dy
             self.pos_z = dz
 
+        print(f"Posição atual recebida: X={self.pos_x:.2f}, Y={self.pos_y:.2f}, Z={self.pos_z:.2f}")
+
         # # O drone (pos_x/y) se move em direção ao alvo (cmd_x/y)
         # if abs(self.pos_x - self.cmd_x.get()) > step:
         #      self.pos_x += step if self.cmd_x.get() > self.pos_x else -step
@@ -226,6 +238,17 @@ def networkThread(event:threading.Event):
                 except ConnectionRefusedError:
                     time.sleep(1)
                     continue
+
+            data = client.recv(1024)
+            #print("Received response:", data.decode('utf-8'))
+            x_str, y_str, z_str = data.decode('utf-8').split(',')
+            dx = float(x_str)
+            dy = float(y_str)
+            dz = float(z_str)
+            if not posQueue.full():
+                posQueue.put((dx, dy, dz))
+                print(f"Updated position to: ({dx}, {dy}, {dz})")
+
             if not cmdQueue.empty():
                 (x, y, z) = cmdQueue.get(timeout=1.0)
                 message = f"{x},{y},{z}".encode('utf-8')
@@ -233,18 +256,9 @@ def networkThread(event:threading.Event):
                 message = "nop".encode('utf-8')
                 
 
-            print("Sending:", message)
+            #print("Sending:", message)
             client.sendall(message)
 
-
-            data = client.recv(1024)
-            print("Received response:", data.decode('utf-8'))
-            x_str, y_str, z_str = data.decode('utf-8').split(',')
-            dx = float(x_str)
-            dy = float(y_str)
-            dz = float(z_str)
-            if not posQueue.full():
-                posQueue.put((dx, dy, dz))
 
     except Exception as e:
         print("Communication error:", e)
@@ -252,21 +266,34 @@ def networkThread(event:threading.Event):
         print("Closing connection...")
         client.close() 
 
+def historyThread(event:threading.Event):
+    with open("historiador.txt", "w") as f:
+        f.write("Timestamp, X, Y, Z\n")
+
+    while not event.is_set():
+        with open("historiador.txt", "a") as f:
+            if not posQueue.empty():
+                (x, y, z) = posQueue.get()
+                timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                f.write(f"{timestamp}, {x:.2f}, {y:.2f}, {z:.2f}\n")
 
 def main():
     event = threading.Event()
     netThread = threading.Thread(target=networkThread, args=(event,))
     gThread = threading.Thread(target=guiThread, args=(event,))
+    hThread = threading.Thread(target=historyThread, args=(event,))
 
     try:
         netThread.start()
         gThread.start()
+        hThread.start()
 
         while netThread.is_alive():
             netThread.join(timeout=1.0)
         while gThread.is_alive():
             gThread.join(timeout=1.0)
-
+        while hThread.is_alive():
+            hThread.join(timeout=1.0)
     except KeyboardInterrupt:
         print("Exiting...")
         event.set()
