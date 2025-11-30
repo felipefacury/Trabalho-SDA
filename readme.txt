@@ -19,6 +19,7 @@ Instale as dependências:
 
 Certifique-se também de ter:
 - Python 3
+- tmux
 - CoppeliaSim rodando com o Simulation Server em:
       opc.tcp://localhost:53530/OPCUA/SimulationServer
 - Abrir o arquivo de simulação drone.ttt
@@ -33,20 +34,12 @@ Todo o sistema pode ser iniciado usando o script:
 
     ./launch.sh
 
-Este script inicia automaticamente:
+Este script inicia automaticamente um tmux com:
 - bridge.py
 - CLP.py
 - GUI.py (supervisório)
 - serverMES.py
 - clientMES.py
-
-Nenhum log é salvo em arquivo; toda saída é suprimida.
-
-Para interromper tudo:
-
-    kill <PID1> <PID2> <PID3> ...
-
-(os PIDs são mostrados ao rodar o script)
 
 -------------------------------
 3. Operação do Supervisório
@@ -82,4 +75,8 @@ clientMES.py    -> Cliente MES (gera histórico)
 launch.sh       -> Inicia todo o sistema  
 
 
+-------------------------------
+6. Vídeo do trabalho 
+-------------------------------
 
+https://youtu.be/qrHOLmTLRII

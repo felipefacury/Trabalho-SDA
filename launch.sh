@@ -1,41 +1,54 @@
 #!/bin/bash
 
-echo "=== Iniciando bridge ==="
-python3 bridge.py > /dev/null 2>&1 &
-PID_BRIDGE=$!
+SESSION="drone_system"
 
-sleep 1
+# Remove sessão antiga
+tmux kill-session -t $SESSION 2>/dev/null
 
-echo "=== Iniciando CLP ==="
-python3 CLP.py > /dev/null 2>&1 &
-PID_CLP=$!
+# Cria sessão + primeiro painel (pane 0)
+tmux new-session -d -s $SESSION -n main
 
-sleep 1  
+# Criar todos os 6 painéis primeiro
+tmux split-window -v -t $SESSION:0        # pane 1
+tmux select-pane -t $SESSION:0.0
+tmux split-window -h -t $SESSION:0.0      # pane 2
+tmux select-pane -t $SESSION:0.1
+tmux split-window -h -t $SESSION:0.1      # pane 3
+tmux select-pane -t $SESSION:0.2
+tmux split-window -v -t $SESSION:0.2      # pane 4
+tmux select-pane -t $SESSION:0.3
+tmux split-window -v -t $SESSION:0.3      # pane 5
 
-echo "=== Iniciando Supervisório TCP ==="
-python3 GUI.py > /dev/null 2>&1 &
-PID_SUP=$!
+# Agora temos 6 painéis: 0,1,2,3,4,5
 
-sleep 1
+###########################################
+# Inicialização com dependências + delays #
+###########################################
 
-echo "=== Iniciando MES server ==="
-python3 serverMES.py > /dev/null 2>&1 &
-PID_MES=$!
+# 1) bridge.py (independente)
+tmux send-keys -t $SESSION:0.0 "python3 bridge.py" C-m
 
-sleep 1
+# 2) CLP.py
+tmux send-keys -t $SESSION:0.1 "python3 CLP.py" C-m
 
-echo "=== Iniciando MES client ==="
-python3 clientMES.py > /dev/null 2>&1 &
-PID_MES_CL=$!
+# ------ Espera CLP subir ------
+sleep 2
 
-echo ""
-echo "Processos iniciados:"
-echo "  Bridge PID        = $PID_BRIDGE"
-echo "  CLP PID           = $PID_CLP"
-echo "  Supervisório PID  = $PID_SUP"
-echo "  MES Server PID    = $PID_MES"
-echo "  MES Client PID    = $PID_MES_CL"
+# 3) GUI.py (cliente TCP, depende do CLP)
+tmux send-keys -t $SESSION:0.2 "python3 GUI.py" C-m
 
-echo ""
-echo "Para parar tudo use:"
-echo "  kill $PID_BRIDGE $PID_CLP $PID_SUP $PID_MES $PID_MES_CL"
+# 4) serverMES.py
+tmux send-keys -t $SESSION:0.3 "python3 serverMES.py" C-m
+
+# ------ Espera MES server subir ------
+sleep 2
+
+# 5) clientMES.py (depende do serverMES)
+tmux send-keys -t $SESSION:0.4 "python3 clientMES.py" C-m
+
+# 6) shell livre
+tmux send-keys -t $SESSION:0.5 "bash" C-m
+
+# Entra no tmux
+tmux attach -t $SESSION
+
